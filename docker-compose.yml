@@ -1,0 +1,89 @@
+version: "3.2"
+services:
+  name_server:
+    image: adamlv/ubuntu-python3:1.1
+    hostname: master
+    container_name: master
+    restart: always
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./:/project
+#    env_file:
+#      - .env
+    networks:
+      dfs:
+        ipv4_address: 172.20.0.2
+#    ports:
+#      - "9870:9870"  # HDFS Web UI
+#      - "8088:8088"    # YARN Web UI
+
+  data_server1:
+    image: adamlv/ubuntu-python3:1.1
+    hostname: data_server1
+    container_name: data_server1
+    restart: always
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./:/project
+    links:
+      - name_server
+    networks:
+      dfs:
+        ipv4_address: 172.20.0.3
+
+  data_server2:
+    image: adamlv/ubuntu-python3:1.1
+    hostname: data_server2
+    container_name: data_server2
+    restart: always
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./:/project
+    links:
+      - name_server
+    networks:
+      dfs:
+        ipv4_address: 172.20.0.4
+
+  data_server3:
+    image: adamlv/ubuntu-python3:1.1
+    hostname: data_server3
+    container_name: data_server3
+    restart: always
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./:/project
+    links:
+      - name_server
+    networks:
+      dfs:
+        ipv4_address: 172.20.0.5
+
+
+  data_server4:
+    image: adamlv/ubuntu-python3:1.1
+    hostname: data_server4
+    container_name: data_server4
+    restart: always
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./:/project
+    links:
+      - name_server
+    networks:
+      dfs:
+        ipv4_address: 172.20.0.6
+
+
+networks:
+  dfs:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
