@@ -1,0 +1,13 @@
+class MetadataServer:
+    def __init__(self):
+        ...
+
+    def _mkdir(self, path):
+        ...
+
+    def _ls(self, path):
+        ...
+
+
+class MetadataNode:
+    ...
