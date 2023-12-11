@@ -2,8 +2,8 @@ version: "3.2"
 services:
   name_server:
     image: adamlv/ubuntu-python3:1.1
-    hostname: master
-    container_name: master
+    hostname: name_server
+    container_name: name_server
     restart: always
     stdin_open: true
     tty: true
