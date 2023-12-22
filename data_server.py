@@ -19,6 +19,7 @@ class DataServer:
 
         all_data_servers = self.get_hostnames()
         self.hostname = socket.gethostname()
+        # 除了自己以外的其他dataserver。分发文件块的时候需要和他们进行通信
         self.peer_data_servers = [data_server for data_server in all_data_servers if data_server != self.hostname]
 
     @staticmethod
@@ -65,6 +66,7 @@ class DataServer:
             data = f.read()
             cal_checksum = DataServer._cal_checksum(data)
         if checksum == cal_checksum:
+            # checksum一致，说明文件没有损坏
             return jsonify({'status': 'success', 'data': data})
         else:
             return jsonify({'status': 'fail', 'data': None})
@@ -79,8 +81,9 @@ class DataServer:
         file_name, data = request.files['file']
         chunk_num = request.form.get('chunk_num')
         local_path = DataServer._write(data, file_name, chunk_num)
+        # 如果是name_server发的，就需要分发给其他data_server
         if source == 'name_server':
-            # 如果是name_server发的，就需要分发给其他data_server
+            # 用线程池发送多个文件块，并发操作提高速度
             with ThreadPoolExecutor(max_workers=4) as executor:
                 for data_server in self.peer_data_servers:
                     executor.submit(self.send_chunk, data_server, data, file_name, chunk_num)
