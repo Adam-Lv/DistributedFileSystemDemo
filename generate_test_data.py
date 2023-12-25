@@ -1,3 +1,8 @@
+"""
+生成指定大小，指定位置的测试文件
+"""
+
+
 def generate_text_file(size_in_mb, file_name='output.txt'):
     # Convert size from MB to bytes
     size_in_bytes = size_in_mb * 1024 * 1024 - 20
