@@ -129,13 +129,16 @@ class MetadataServer:
         self.pwd = pwd
         return cd_res
 
-    def touch(self, path, working_directory):
+    def touch(self, path, working_directory, metadata=None):
         abs_path = self.get_abs_path(path, working_directory)
         if self.exist(abs_path):
             return f'{path} already exists.'
         parent = "/".join(path.split('/')[:-1])
         self.cd(parent, working_directory)
-        new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
+        if metadata is None:
+            new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
+        else:
+            new_file = FileNode(parent, abs_path, **metadata)
         self.pwd.add_child(new_file)
         return 'success'
 
@@ -197,6 +200,22 @@ class MetadataServer:
             raise OSError(f'{folder} is not deleted.')
         return
 
+    def upload_new_file(self, file, path, working_directory):
+        """
+        上传新文件
+        :param file: 文件流
+        :param path: 文件路径
+        :param working_directory: 工作目录
+        :return:
+        """
+        abs_path = self.get_abs_path(path, working_directory)
+        if self.exist(abs_path):
+            return f'{path} already exists.'
+        parent = "/".join(path.split('/')[:-1])
+        self.cd(parent, working_directory)
+        new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
+        self.pwd.add_child(new_file)
+        return 'success'
 
 class MetadataNode:
     def __init__(self, parent, path, **kwargs):

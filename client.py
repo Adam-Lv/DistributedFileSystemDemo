@@ -146,5 +146,6 @@ class Client:
                       "rm, touch, cd, pwd, read_metadata, exit")
 
 
-client = Client(name_server_url='name_server')
-client.run()
+if __name__ == '__main__':
+    client = Client(name_server_url='localhost')
+    client.run()

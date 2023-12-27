@@ -1,13 +1,34 @@
-import os
+from concurrent.futures import ThreadPoolExecutor
+import requests
+import yaml
+
 from metadata_server import MetadataServer
 from flask import Flask, request, jsonify
 
 
 class NameServer:
     def __init__(self):
+        self.replication_num = 3
         self.working_directory = '/'
         self.metadata_server = MetadataServer()
         self.root = self.metadata_server.root
+        self.data_servers = []
+        with open('docker-compose.yml', 'r') as f:
+            data = yaml.load(f.read(), Loader=yaml.FullLoader)
+        for service in data['services']:
+            if service.startswith('data_server'):
+                self.data_servers.append(service)
+
+    @staticmethod
+    def send_chunk(host, data, file_name, chunk_num):
+        """
+        发送文件块给其他DataServer或NameServer
+        """
+        requests.post(
+            f'http://{host}:9080/upload_chunk',
+            files={'file': (file_name, data)},
+            data={'source': host, 'chunk_num': chunk_num}
+        )
 
     def mkdir(self):
         """
@@ -18,7 +39,7 @@ class NameServer:
         if res == 'success':
             return jsonify({'status': 'success'})
         else:
-            return jsonify({'status': 'fail', 'error': res})
+            return jsonify({'status': 'fail', 'message': res})
 
     def ls(self):
         """
@@ -26,10 +47,10 @@ class NameServer:
         """
         path = request.form.get('path')
         res = self.metadata_server.ls(path, self.working_directory)
-        if res == 'success':
+        if not isinstance(res, str):
             return jsonify({'status': 'success', 'data': res})
         else:
-            return jsonify({'status': 'fail', 'error': res})
+            return jsonify({'status': 'fail', 'message': res})
 
     def rm(self):
         """
@@ -43,7 +64,7 @@ class NameServer:
         if res == 'success':
             return jsonify({'status': 'success'})
         else:
-            return jsonify({'status': 'fail', 'error': res})
+            return jsonify({'status': 'fail', 'message': res})
 
     def touch(self):
         """
@@ -54,7 +75,7 @@ class NameServer:
         if res == 'success':
             return jsonify({'status': 'success'})
         else:
-            return jsonify({'status': 'fail', 'error': res})
+            return jsonify({'status': 'fail', 'message': res})
 
     def cd(self):
         """
@@ -66,7 +87,7 @@ class NameServer:
             self.working_directory = path
             return jsonify({'status': 'success'})
         else:
-            return jsonify({'status': 'fail', 'error': cd_res})
+            return jsonify({'status': 'fail', 'message': cd_res})
 
     def read_metadata(self):
         """
@@ -74,10 +95,10 @@ class NameServer:
         """
         path = request.args.get('path')
         if not self.metadata_server.exist(path):
-            return jsonify({'status': 'fail', 'error': 'path does not exist'})
+            return jsonify({'status': 'fail', 'message': 'path does not exist'})
         return jsonify({'status': 'success', 'data': dict(self.metadata_server.pwd.metadata)})
 
-    def upload(self, file, path):
+    def upload(self):
         """
         从客户端接收上传的文件流，根据文件大小确定对应的分块所在dataserver的位置，
         并将文件分块保存到dataserver中，同时更新metadata_file_tree。
@@ -92,18 +113,32 @@ class NameServer:
         #             data={'source': host, 'chunk_num': chunk_num}
 
         #         )
-        if not os.path.exists(path):
-            raise FileExistsError(f'{path} already exists.')
-        file = open(file, 'b')
-        data = file.read()
-        file_size = len(data)
+        path = request.form.get('path')
+        file = request.files['file']
         chunk_size = 2 * 1024 * 1024  # 2MB per chunk
-        chunk_num = (file_size + chunk_size - 1) // chunk_size  # 计算文件块数
-
-        # 准备文件块和元数据
-        chunks = [data[i * chunk_size:(i + 1) * chunk_size] for i in range(chunk_num)]
+        chunks = []
+        chunk_num = 0
         main_chunk_list = []
-        replications = []
+        while True:
+            chunk = file.stream.read(chunk_size)
+            if not chunk:
+                break
+            chunk_num += 1
+            main_chunk_list.append(chunk_num % 4)
+            chunks.append(chunk)
+        file_size = file.tell()
+        metadata = {
+            'file_size': file_size,
+            'chunk_num': chunk_num,
+            'main_chunk_list': main_chunk_list,
+            'replications': [main_chunk_list.copy() for _ in range(self.replication_num)]
+        }
+        touch_res = self.metadata_server.touch(path, self.working_directory, metadata)
+
+        # 创建一个线程，将chunk发送给对应的dataserver
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for chunk, chunk_num in zip(chunks, range(chunk_num)):
+                executor.submit(self.send_chunk, self.data_servers[main_chunk_list[chunk_num]], chunk, path, chunk_num)
 
     def read(self, file_path):
         """

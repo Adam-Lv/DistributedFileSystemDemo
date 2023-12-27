@@ -17,8 +17,8 @@ class DataServer:
         # if not os.path.exists(self.metadata_path):
         #     os.mkdir(self.metadata_path)
 
-        all_data_servers = self.get_hostnames() # 所有的data_server的hostname
-        self.hostname = socket.gethostname()  ## 当前data_server的hostname
+        all_data_servers = self.get_hostnames()  # 所有的data_server的hostname
+        self.hostname = socket.gethostname()  # 当前data_server的hostname
         # 除了自己以外的其他dataserver。分发文件块的时候需要和他们进行通信
         self.peer_data_servers = [data_server for data_server in all_data_servers if data_server != self.hostname]
 
