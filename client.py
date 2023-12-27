@@ -1,5 +1,4 @@
 import json
-
 import requests
 
 
@@ -21,11 +20,9 @@ class Client:
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
-        else:
-            print()
 
     def _read(self, file_path):
-        response = requests.post(
+        response = requests.get(
             f'http://{self.name_server}:9080/read',
             params={'path': file_path}
         )
@@ -48,8 +45,6 @@ class Client:
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
-        else:
-            print()
 
     def _ls(self, path='.'):
         response = requests.post(
@@ -70,8 +65,6 @@ class Client:
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
-        else:
-            print()
 
     def _touch(self, path):
         response = requests.post(
@@ -80,8 +73,6 @@ class Client:
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
-        else:
-            print()
 
     def _cd(self, path):
         response = requests.post(
@@ -90,8 +81,6 @@ class Client:
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
-        else:
-            print()
 
     def _pwd(self):
         response = requests.post(f'http://{self.name_server}:9080/cd')

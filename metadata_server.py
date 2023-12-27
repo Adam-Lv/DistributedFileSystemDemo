@@ -200,22 +200,12 @@ class MetadataServer:
             raise OSError(f'{folder} is not deleted.')
         return
 
-    def upload_new_file(self, file, path, working_directory):
-        """
-        上传新文件
-        :param file: 文件流
-        :param path: 文件路径
-        :param working_directory: 工作目录
-        :return:
-        """
+    def read_metadata(self, path, working_directory):
         abs_path = self.get_abs_path(path, working_directory)
-        if self.exist(abs_path):
-            return f'{path} already exists.'
-        parent = "/".join(path.split('/')[:-1])
-        self.cd(parent, working_directory)
-        new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
-        self.pwd.add_child(new_file)
-        return 'success'
+        if not self.exist(abs_path):
+            return f'{path} does not exist.'
+        return self.pwd.metadata
+
 
 class MetadataNode:
     def __init__(self, parent, path, **kwargs):
@@ -237,17 +227,17 @@ class MetadataNode:
     # def metadata(self):
     #     return self.metadata
 
-    # def update(self, **kwargs):
-    #     """
-    #     更新metadata内容
-    #     """
-    #     for k, v in kwargs.items():
-    #         if k not in self.metadata:
-    #             raise KeyError(f'{k} is not in metadata.')
-    #         self.metadata[k] = v
-    #     self.metadata['update-time'] = time.time()
-    #     with open(self.local_file, 'wb') as f:
-    #         f.write(pickle.dumps(self))
+    def update(self, **kwargs):
+        """
+        更新metadata内容
+        """
+        for k, v in kwargs.items():
+            if k not in self.metadata:
+                raise KeyError(f'{k} is not in metadata.')
+            self.metadata[k] = v
+        self.metadata['update-time'] = time.time()
+        with open(self.local_file, 'wb') as f:
+            f.write(pickle.dumps(self))
 
     def __eq__(self, other):
         return self.path == other.path
@@ -305,6 +295,7 @@ class FileNode(MetadataNode):
         self.metadata['chunk_num'] = metadata['chunk_num']
         self.metadata['main_chunk_list'] = metadata['main_chunk_list']
         self.metadata['replications'] = metadata['replications']
+        self.metadata['chunk_name'] = metadata['chunk_name']
 
         m = md5()
         m.update(self.metadata.__str__().encode('utf-8'))

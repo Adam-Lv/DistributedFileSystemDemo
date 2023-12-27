@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import yaml
-
+from hashlib import md5
 from metadata_server import MetadataServer
 from flask import Flask, request, jsonify
 
@@ -24,11 +24,26 @@ class NameServer:
         """
         发送文件块给其他DataServer或NameServer
         """
-        requests.post(
+        response = requests.post(
             f'http://{host}:9080/upload_chunk',
             files={'file': (file_name, data)},
-            data={'source': host, 'chunk_num': chunk_num}
+            data={'source': 'name_server', 'chunk_num': chunk_num}
         )
+        # TODO: 添加失败的逻辑。这里默认发送成功
+        return response.json()['local_path']
+
+    @staticmethod
+    def read_chunk(host, file_name):
+        """
+        从DataServer获取文件块
+        """
+        response = requests.post(
+            f'http://{host}:9080/read_chunk',
+            data={'file_name': file_name}
+        )
+        if response.json()['status'] != 'success':
+            return None, response.json()['message']
+        return response.json()['data'], None
 
     def mkdir(self):
         """
@@ -57,7 +72,6 @@ class NameServer:
         删除文件
         """
         path = request.form.get('path')
-
         res = self.metadata_server.rm(path, self.working_directory)
         # TODO: 在这里向dataserver发送删除文件的请求
         # response = requests.get('http://')
@@ -107,12 +121,6 @@ class NameServer:
         # 2. 为这个文件创建一个metadata，文件大小、文件块数、main-chunk-list、replications
         # 3. 确定每个块对应的dataserver
         # 4. 将每个块发送给对应的dataserver，只需要发送一次
-        #         requests.post(
-        #             f'http://{host}:9080/upload_chunk',
-        #             files={'file': (file_name, data)},
-        #             data={'source': host, 'chunk_num': chunk_num}
-
-        #         )
         path = request.form.get('path')
         file = request.files['file']
         chunk_size = 2 * 1024 * 1024  # 2MB per chunk
@@ -131,16 +139,30 @@ class NameServer:
             'file_size': file_size,
             'chunk_num': chunk_num,
             'main_chunk_list': main_chunk_list,
-            'replications': [main_chunk_list.copy() for _ in range(self.replication_num)]
+            'replications': [main_chunk_list.copy() for _ in range(self.replication_num)],
+            'chunk_name': None
         }
         touch_res = self.metadata_server.touch(path, self.working_directory, metadata)
-
-        # 创建一个线程，将chunk发送给对应的dataserver
+        if touch_res != 'success':
+            return jsonify({'status': 'fail', 'message': touch_res})
+        # touch创建新文件后，会将pwd指向新文件，获取它的绝对路径
+        file_name = self.metadata_server.pwd.path
+        # 但是由于绝对路径包含斜杠，无法直接作为文件名，所以需要对文件名进行hash
+        m = md5()
+        m.update(file_name)
+        file_name = m.hexdigest()
+        # 创建一个线程池，将chunk发送给对应的dataserver
         with ThreadPoolExecutor(max_workers=4) as executor:
+            threads = []
             for chunk, chunk_num in zip(chunks, range(chunk_num)):
-                executor.submit(self.send_chunk, self.data_servers[main_chunk_list[chunk_num]], chunk, path, chunk_num)
+                threads.append(executor.submit(self.send_chunk, self.data_servers[main_chunk_list[chunk_num]],
+                                               chunk, file_name, chunk_num))
+            results = [thread.result() for thread in threads]
+        # 更新metadata中的chunk_name
+        self.metadata_server.pwd.update({'chunk_name': results})
+        return jsonify({'status': 'success'})
 
-    def read(self, file_path):
+    def read(self):
         """
         读取文件：根据文件路径读取metadata，根据metadata中的文件大小确定需要读取的分块，
         从dataserver中读取分块并拼接成完整的文件，返回文件流。
@@ -148,12 +170,28 @@ class NameServer:
         # 1. 读取metadata，文件块数、main-chunk-list、replications
         # 2. 确定每个块对应的dataserver
         # 3. 从dataserver中读取每个块，拼接成完整的文件，返回文件流
-        #         requests.post(
-        #             f'http://{host}:9080/read_chunk',
-        #             data={'file_name': filename}
-        #         )
         #    requests会返回一些信息{'status': 'success', 'data': data}
         # 4. 接收dataserver返回的文件流，拼接成完整的文件，存在本地
+        path = request.args.get('path')
+        metadata = self.metadata_server.read_metadata(path, self.working_directory)
+        if isinstance(metadata, str):
+            return jsonify({'status': 'fail', 'message': metadata})
+        main_chunk_list = metadata['main_chunk_list']
+        chunk_name = metadata['chunk_name']
+        chunks = dict()
+        # 创建一个线程池，从dataserver中读取chunk
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for chunk_num in range(metadata['chunk_num']):
+                futures.append(executor.submit(self.read_chunk, self.data_servers[main_chunk_list[chunk_num]],
+                                               chunk_name[chunk_num]))
+            for future in futures:
+                chunk, message = future.result()
+                if chunk is None:
+                    # TODO: 添加读取备份的逻辑
+                    return jsonify({'status': 'fail', 'message': message})
+                chunks[chunk_num] = chunk
+        return jsonify({'status': 'success', 'data': chunks})
 
 
 # if __name__ == '__main__':
@@ -162,7 +200,7 @@ ds = NameServer()
 # 客户端通过访问http://localhost:9080/upload_chunk来上传文件块
 app.add_url_rule('/upload', 'upload', ds.upload, methods=['POST'])
 # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
-app.add_url_rule('/read', 'read', ds.read, methods=['POST'])
+app.add_url_rule('/read', 'read', ds.read, methods=['GET'])
 app.add_url_rule('/mkdir', 'mkdir', ds.mkdir, methods=['POST'])
 app.add_url_rule('/ls', 'ls', ds.ls, methods=['POST'])
 app.add_url_rule('/rm', 'rm', ds.rm, methods=['POST'])

@@ -52,14 +52,17 @@ class DataServer:
         if len(file_name.split('.')) == 1:
             # 这里是指文件来自于NameServer，所以文件名不包含checksum
             checksum = DataServer._cal_checksum(data)
-            file_name = file_name + '.' + str(chunk_num) + '.' + checksum
+            file_name = os.path.join(DataServer.data_disk_path, 'main', f'{file_name}.{chunk_num}.{checksum}')
+        else:
+            file_name, checksum = file_name.split('.')[0], file_name.split[2]
+            file_name = os.path.join(DataServer.data_disk_path, 'replication', f'{file_name}.{chunk_num}.{checksum}')
         ### 这里的wb保证了当文件不存在时，会创建文件，如果文件存在，则会覆盖文件
-        with open(DataServer.data_disk_path + file_name, 'wb') as f:
+        with open(file_name, 'wb') as f:
             f.write(data)
-        return DataServer.data_disk_path + file_name
+        return file_name
 
     @staticmethod
-    def read():
+    def read_chunk():
         """
         读取本地文件，返回读取的二进制文件内容
         先在本地检查读进来的文件的checksum和传入的checksum是否一致,再发给nameserver
@@ -67,16 +70,19 @@ class DataServer:
         ### 得到name server传来的文件名，这里原始的client传来的文件名应该是不包含块数和checksum的
         file_name = request.form.get('file_name')
         checksum = file_name.split('.')[2]
-        with open(file_name, 'rb') as f:
-            data = f.read()
-            cal_checksum = DataServer._cal_checksum(data)
+        try:
+            with open(file_name, 'rb') as f:
+                data = f.read()
+        except FileNotFoundError:
+            return jsonify({'status': 'fail', 'data': None, 'message': 'file not found'})
+        cal_checksum = DataServer._cal_checksum(data)
         if checksum == cal_checksum:
             # checksum一致，说明文件没有损坏
             return jsonify({'status': 'success', 'data': data})
         else:
-            return jsonify({'status': 'fail', 'data': None})
+            return jsonify({'status': 'fail', 'data': None, 'message': 'file broken'})
 
-    def handle_request(self):
+    def upload_chunk(self):
         """
         接收来自其他DataServer的文件流，或者接收来自NameServer的文件流，然后将文件保存到本地。
         如果是来自NameServer的文件流，还需要将文件分发给其他DataServer
@@ -91,18 +97,18 @@ class DataServer:
             # 用线程池发送多个文件块，并发操作提高速度
             with ThreadPoolExecutor(max_workers=4) as executor:
                 for data_server in self.peer_data_servers:
-                    executor.submit(self.send_chunk, data_server, data, file_name, chunk_num)
-            return jsonify({'status': 'success', 'local-path': local_path})
+                    executor.submit(self.send_chunk, self.hostname, data_server, data, file_name, chunk_num)
+        return jsonify({'status': 'success', 'local_path': local_path})
 
     @staticmethod
-    def send_chunk(host, data, file_name, chunk_num):
+    def send_chunk(source, host, data, file_name, chunk_num):
         """
         发送文件块给其他DataServer或NameServer
         """
         requests.post(
             f'http://{host}:9080/upload_chunk',
             files={'file': (file_name, data)},
-            data={'source': host, 'chunk_num': chunk_num}
+            data={'source': source, 'chunk_num': chunk_num}
         )
 
 
@@ -110,7 +116,7 @@ if __name__ == '__main__':
     app = Flask(__name__)
     ds = DataServer()
     # 客户端通过访问http://localhost:9080/upload_chunk来上传文件块
-    app.add_url_rule('/upload_chunk', 'upload_chunk', ds.handle_request, methods=['POST'])
+    app.add_url_rule('/upload_chunk', 'upload_chunk', ds.upload_chunk, methods=['POST'])
     # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
-    app.add_url_rule('/read_chunk', 'read_chunk', ds.read, methods=['POST'])
+    app.add_url_rule('/read_chunk', 'read_chunk', ds.read_chunk, methods=['POST'])
     app.run(host='0.0.0.0', port=9080)
