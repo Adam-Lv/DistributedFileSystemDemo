@@ -98,18 +98,25 @@ class NameServer:
         path = request.form.get('path')
         cd_res = self.metadata_server.cd(path, self.working_directory)
         if cd_res == 'success':
-            self.working_directory = path
+            self.working_directory = self.metadata_server.pwd.path
             return jsonify({'status': 'success'})
         else:
             return jsonify({'status': 'fail', 'message': cd_res})
+
+    def pwd(self):
+        """
+        返回当前工作目录
+        """
+        return jsonify({'status': 'success', 'working_directory': self.working_directory})
 
     def read_metadata(self):
         """
         读取传入path的metadata，可以是文件或者目录
         """
-        path = request.args.get('path')
+        path = request.form.get('path')
         if not self.metadata_server.exist(path):
             return jsonify({'status': 'fail', 'message': 'path does not exist'})
+        # TODO: self.metadata_server.pwd.metadata无法转换json。
         return jsonify({'status': 'success', 'data': dict(self.metadata_server.pwd.metadata)})
 
     def upload(self):
@@ -206,6 +213,7 @@ app.add_url_rule('/ls', 'ls', ds.ls, methods=['POST'])
 app.add_url_rule('/rm', 'rm', ds.rm, methods=['POST'])
 app.add_url_rule('/touch', 'touch', ds.touch, methods=['POST'])
 app.add_url_rule('/cd', 'cd', ds.cd, methods=['POST'])
-app.add_url_rule('/read_metadata', 'read_metadata', ds.read_metadata, methods=['GET'])
+app.add_url_rule('/pwd', 'pwd', ds.pwd, methods=['GET'])
+app.add_url_rule('/read_metadata', 'read_metadata', ds.read_metadata, methods=['POST'])
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=9080)

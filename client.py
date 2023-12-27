@@ -83,14 +83,14 @@ class Client:
             print(f"Error: {response.json()['message']}")
 
     def _pwd(self):
-        response = requests.post(f'http://{self.name_server}:9080/cd')
+        response = requests.get(f'http://{self.name_server}:9080/pwd')
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
             return
         print(response.json()['working_directory'])
 
     def _read_metadata(self, path):
-        response = requests.get(
+        response = requests.post(
             f'http://{self.name_server}:9080/read_metadata',
             data={'path': path}
         )

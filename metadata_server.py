@@ -7,7 +7,7 @@ import sys
 
 
 class MetadataServer:
-    metadata_path = '/meta_data/'
+    metadata_path = '/meta_data'
 
     def __init__(self):
         # 整个目录树的根节点
@@ -15,12 +15,8 @@ class MetadataServer:
             os.mkdir(self.metadata_path)
         if len(os.listdir(self.metadata_path)) == 0:
             root = FolderNode(None, '/')
-            ### 通过pickle将root序列化后写入文件，可以存储对象
-            with open(f'{self.metadata_path}/root.pkl', 'wb') as f:
-                f.write(pickle.dumps(root))
         else:
-            with open(f'{self.metadata_path}/root.pkl', 'rb') as f:
-                root = pickle.loads(f.read())
+            root = self.reconstruct_tree(f'{self.metadata_path}/root.pkl')
         self.root = root
         # 当前指针指向的节点
         self.pwd = root
@@ -46,8 +42,9 @@ class MetadataServer:
             child.parent = parent
             self.pwd.children.append(child)
             if isinstance(child, FolderNode):
+                print(child.name, child.children_pkls)
                 for child_pkl in child.children_pkls:
-                    my_queue.append((child_pkl, root))
+                    my_queue.append((child_pkl, child))
         return root
 
     def exist(self, path):
@@ -109,7 +106,7 @@ class MetadataServer:
             return cd_res
         folder = self.pwd
         self.pwd = pwd
-        res = list(folder.metadata['files'].values())
+        res = list(folder.metadata['files'].keys())
         if abs_path == '/':
             res = ['.'] + res
         else:
@@ -117,16 +114,17 @@ class MetadataServer:
         return res
 
     def mkdir(self, path, working_directory):
-        parent = "/".join(path.split('/')[:-1])
+        abs_path = self.get_abs_path(path, working_directory)
+        parent = "/".join(abs_path.split('/')[:-1])
+        print(abs_path, parent)
         # 新建一个指向self.pwd的指针，因为cd会更改self.pwd
-        pwd = self.pwd
-        cd_res = self.cd(parent, working_directory)
+        # pwd = self.pwd
+        cd_res = self.cd(parent, '/')
         if cd_res != 'success':
             return cd_res
-        absolute_path = self.get_abs_path(path, working_directory)
-        new_node = FolderNode(parent, absolute_path)
+        new_node = FolderNode(parent, abs_path)
         self.pwd.add_child(new_node)
-        self.pwd = pwd
+        # self.pwd = pwd
         return cd_res
 
     def touch(self, path, working_directory, metadata=None):
@@ -136,7 +134,8 @@ class MetadataServer:
         parent = "/".join(path.split('/')[:-1])
         self.cd(parent, working_directory)
         if metadata is None:
-            new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
+            new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[],
+                                replications=0, chunk_name=None)
         else:
             new_file = FileNode(parent, abs_path, **metadata)
         self.pwd.add_child(new_file)
@@ -253,12 +252,15 @@ class FolderNode(MetadataNode):
         self.metadata['update_time'] = create_time
         self.metadata['name'] = path.split('/')[-1]
         self.metadata['files'] = OrderedDict()
-
         # 只有子节点的pkl文件路径才需要存，父节点、本节点的不在这里存
         self.children_pkls: list[str] = []
-        m = md5()
-        m.update(self.metadata.__str__().encode('utf-8'))
-        self.local_file = f"{MetadataServer.metadata_path}/{m.hexdigest()}.pkl"
+
+        if path == '/':
+            self.local_file = f"{MetadataServer.metadata_path}/root.pkl"
+        else:
+            m = md5()
+            m.update(self.metadata.__str__().encode('utf-8'))
+            self.local_file = f"{MetadataServer.metadata_path}/{m.hexdigest()}.pkl"
         with open(self.local_file, 'wb') as f:
             f.write(pickle.dumps(self))
 
