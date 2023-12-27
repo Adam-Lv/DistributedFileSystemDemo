@@ -1,13 +1,12 @@
-import requests
-
+import os
 from metadata_server import MetadataServer
 from flask import Flask, request, jsonify
 
 
 class NameServer:
-    def __init__(self, metadata_server=None):
+    def __init__(self):
         self.working_directory = '/'
-        self.metadata_server: MetadataServer = MetadataServer()
+        self.metadata_server = MetadataServer()
         self.root = self.metadata_server.root
 
     def mkdir(self):
@@ -46,7 +45,7 @@ class NameServer:
         else:
             return jsonify({'status': 'fail', 'error': res})
 
-    def touch(self, path):
+    def touch(self):
         """
         创建文件
         """
@@ -56,24 +55,27 @@ class NameServer:
             return jsonify({'status': 'success'})
         else:
             return jsonify({'status': 'fail', 'error': res})
-        return
 
-    def cd(self, path):
+    def cd(self):
         """
         切换目录
         """
-        new_pwd = self.metadata_server.cd(path)
-        if new_pwd is not None:
-            self.working_directory = new_pwd
-        return self.working_directory
+        path = request.form.get('path')
+        cd_res = self.metadata_server.cd(path, self.working_directory)
+        if cd_res == 'success':
+            self.working_directory = path
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'fail', 'error': cd_res})
 
-    def read_metadata(self, path):
+    def read_metadata(self):
         """
         读取传入path的metadata，可以是文件或者目录
         """
+        path = request.args.get('path')
         if not self.metadata_server.exist(path):
-            raise FileNotFoundError(f'{path} does not exist.')
-        return self.metadata_server.pwd.metadata
+            return jsonify({'status': 'fail', 'error': 'path does not exist'})
+        return jsonify({'status': 'success', 'data': dict(self.metadata_server.pwd.metadata)})
 
     def upload(self, file, path):
         """
@@ -90,7 +92,8 @@ class NameServer:
         #             data={'source': host, 'chunk_num': chunk_num}
 
         #         )
-        self.metadata_server.touch(file, path)
+        if not os.path.exists(path):
+            raise FileExistsError(f'{path} already exists.')
         file = open(file, 'b')
         data = file.read()
         file_size = len(data)
