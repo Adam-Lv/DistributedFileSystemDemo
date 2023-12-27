@@ -17,8 +17,8 @@ class DataServer:
         # if not os.path.exists(self.metadata_path):
         #     os.mkdir(self.metadata_path)
 
-        all_data_servers = self.get_hostnames()
-        self.hostname = socket.gethostname()
+        all_data_servers = self.get_hostnames() # 所有的data_server的hostname
+        self.hostname = socket.gethostname()  ## 当前data_server的hostname
         # 除了自己以外的其他dataserver。分发文件块的时候需要和他们进行通信
         self.peer_data_servers = [data_server for data_server in all_data_servers if data_server != self.hostname]
 
@@ -33,6 +33,9 @@ class DataServer:
 
     @staticmethod
     def get_hostnames():
+        """
+        根据docker-compose获取所有的data_server的hostname
+        """
         all_data_servers = []
         with open('docker-compose.yml', 'r') as f:
             data = yaml.load(f.read(), Loader=yaml.FullLoader)
@@ -44,12 +47,13 @@ class DataServer:
     @staticmethod
     def _write(data, file_name, chunk_num):
         """
-        将文件流写入本地，文件名命名为{原文件名}.{块号}.{checksum}
+        将文件流写入本地，文件名命名为{原文件名}.{块号}.{checksum},返回文件的绝对路径
         """
         if len(file_name.split('.')) == 1:
             # 这里是指文件来自于NameServer，所以文件名不包含checksum
             checksum = DataServer._cal_checksum(data)
             file_name = file_name + '.' + str(chunk_num) + '.' + checksum
+        ### 这里的wb保证了当文件不存在时，会创建文件，如果文件存在，则会覆盖文件
         with open(DataServer.data_disk_path + file_name, 'wb') as f:
             f.write(data)
         return DataServer.data_disk_path + file_name
@@ -58,8 +62,9 @@ class DataServer:
     def read():
         """
         读取本地文件，返回读取的二进制文件内容
-        先在本地检查读进来的文件的checksum和传入的checksum是否一致，再发给nameserver
+        先在本地检查读进来的文件的checksum和传入的checksum是否一致,再发给nameserver
         """
+        ### 得到name server传来的文件名，这里原始的client传来的文件名应该是不包含块数和checksum的
         file_name = request.form.get('file_name')
         checksum = file_name.split('.')[2]
         with open(file_name, 'rb') as f:
@@ -104,6 +109,8 @@ class DataServer:
 if __name__ == '__main__':
     app = Flask(__name__)
     ds = DataServer()
+    # 客户端通过访问http://localhost:9080/upload_chunk来上传文件块
     app.add_url_rule('/upload_chunk', 'upload_chunk', ds.handle_request, methods=['POST'])
+    # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
     app.add_url_rule('/read_chunk', 'read_chunk', ds.read, methods=['POST'])
     app.run(port=9080)
