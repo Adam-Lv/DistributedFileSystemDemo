@@ -1,9 +1,9 @@
 import pickle
-from abc import abstractmethod
 import time
 import os
 from collections import OrderedDict
 from hashlib import md5
+import sys
 
 
 class MetadataServer:
@@ -53,7 +53,7 @@ class MetadataServer:
     def exist(self, path):
         """
         检查输入的文件或文件夹是否存在，如果存在则会将pwd指针指向该文件或文件夹
-        :param path:
+        :param path: dfs文件系统中的绝对路径
         :return:
         """
         path = path.split('/')
@@ -61,8 +61,13 @@ class MetadataServer:
         enter_flag = False
         for i, folder in enumerate(path[1:]):
             try:
+                if folder == '.':
+                    continue
+                elif folder == '..':
+                    self.pwd = self.pwd.parent
+                    continue
                 for child in self.pwd.children:
-                    if child.metadata['name'] == folder and child != self.pwd and child != self.pwd.parent:
+                    if child.metadata['name'] == folder:
                         self.pwd = child
                         enter_flag = True
                         break
@@ -81,130 +86,107 @@ class MetadataServer:
                     return False
         return True
 
+    @staticmethod
+    def get_abs_path(path, working_directory):
+        # 如果path是绝对路径，则直接规范化路径
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        # 如果path是相对路径，首先将工作目录和path合并，然后再规范化
+        joined_path = os.path.join(working_directory, path)
+        return os.path.normpath(os.path.abspath(joined_path))
+
     def ls(self, path, working_directory):
-        path = path.split('/')
-        parent = working_directory + '/'.join(path[:-1])
-        folder = FileNode(parent, path)
-        return folder.metadata
+        if path is None:
+            abs_path = working_directory
+        else:
+            abs_path = self.get_abs_path(path, working_directory)
+        pwd = self.pwd
+        cd_res = self.cd(abs_path, '/')
+        if cd_res != 'success':
+            return cd_res
+        folder = self.pwd
+        self.pwd = pwd
+        res = list(folder.metadata['files'].values())
+        res = ['.', '..'] + res
+        return res
 
     def mkdir(self, path, working_directory):
-        # path = path.split('/')
-        # parent = self.pwd + '/'.join(path[:-1])
-        # if not self.exist(parent):
-        #     return False
-        # parent = self.cd(parent)
-        # new_node = FolderNode(parent, path)
-        # parent.add_child(new_node)
-        ...
+        parent = "/".join(path.split('/')[:-1])
+        # 新建一个指向self.pwd的指针，因为cd会更改self.pwd
+        pwd = self.pwd
+        cd_res = self.cd(parent, working_directory)
+        if cd_res != 'success':
+            return cd_res
+        absolute_path = self.get_abs_path(path, working_directory)
+        new_node = FolderNode(parent, absolute_path)
+        self.pwd.add_child(new_node)
+        self.pwd = pwd
+        return cd_res
 
     def touch(self, path, working_directory):
         path = path.split('/')
         parent = working_directory + '/'.join(path[:-1])
-        if not self.exist(parent):
-            return False
-        parent = self.cd(parent)
+        cd_res = self.cd(path, )
         new_node = FileNode(parent, path)
         parent.add_child(new_node)
-        
 
     def cd(self, path, working_directory):
-        if path[0] != '/':
-            path = working_directory + '/' + path
-        if not self.exist(path):
-            raise FileNotFoundError(f'{path} does not exist.')
+        abs_path = self.get_abs_path(path, working_directory)
+        pwd = self.pwd
+        if not self.exist(abs_path):
+            self.pwd = pwd
+            return f'{path} does not exist.'
         if isinstance(self.pwd, FileNode):
-            raise NotADirectoryError(f'{self.pwd.metadata["name"]} is not a directory.')
-        return self.pwd
-    
-    ### 实现删除文件或者文件夹功能
+            self.pwd = pwd
+            return f'{self.pwd.metadata["name"]} is not a directory.'
+        return 'success'
+
     def rm(self, path, working_directory):
-        if path[0] != '/':
-            path = working_directory + '/' + path
-        if not self.exist(path):
-            raise FileNotFoundError(f'{path} does not exist.')
+        ### 实现删除文件或者文件夹功能
+        abs_path = self.get_abs_path(path, working_directory)
+        if not self.exist(abs_path):
+            return f'{path} does not exist.'
         if isinstance(self.pwd, FileNode):
             ### 删除该文件
-            self.pwd.parent.children_pkls.remove(self.pwd.local_file)
-            os.remove(self.pwd.local_file)
-            self.pwd.parent.children.remove(self.pwd)
-            self.pwd.parent.metadata['files'].pop(self.pwd.metadata['name'])
-            self.pwd.parent.update()
+            parent = self.pwd.parent
+            parent.remove_child(self.pwd)
         ### 如果是文件夹，需要递归删除文件夹下的所有文件和文件夹
         elif isinstance(self.pwd, FolderNode):
-            # 递归删除所有子节点
+            # 递归删除所有子节点，并将pwd指针指向父节点。如果是根目录则指向根节点
             self._recursive_delete_folder(self.pwd)
+        return 'success'
 
-        #self.reconstruct_tree(f'{self.metadata_path}/root.pkl')
-        return True
-
-    def _recursive_delete_folder(self, FolderNode):
+    def _recursive_delete_folder(self, folder):
         """
         递归删除文件夹下的所有文件和文件夹
         :param folder: 文件夹节点
-        :return:
         """
-        # 复制一份子节点列表，因为在迭代过程中会修改这个列表
-        for child in list(FolderNode.children):
+        if folder == self.root:
+            for local_file in os.listdir(MetadataServer.metadata_path):
+                os.remove(local_file)
+            folder.children = []
+            folder.children_pkls = []
+            folder.metadata['files'] = OrderedDict()
+            self.pwd = self.root
+            return
+        # 删除当前文件夹的metadata文件
+        os.remove(folder.local_file)
+        for child in folder.children:
             if isinstance(child, FileNode):
-                ### 删除该文件
-                FolderNode.children_pkls.remove(child.local_file)
+                # 删除该文件的metadata文件
                 os.remove(child.local_file)
-                FolderNode.children.remove(child)
-                FolderNode.metadata['files'].pop(child.metadata['name'],None)
-            elif isinstance(child, FolderNode):
+            elif isinstance(child, folder):
                 self._recursive_delete_folder(child)
-        # 如果文件夹不是根节点，则需要更新父节点的信息
-        if FolderNode.parent:
-            FolderNode.parent.children_pkls.remove(FolderNode.local_file)
-            FolderNode.parent.children.remove(FolderNode)
-            FolderNode.parent.metadata['files'].pop(FolderNode.metadata['name'], None)
-            FolderNode.parent.update()
-        os.remove(FolderNode.local_file)
-
-    ### 实现删除文件或者文件夹功能
-    def rm(self, path, working_directory):
-        if path[0] != '/':
-            path = working_directory + '/' + path
-        if not self.exist(path):
-            raise FileNotFoundError(f'{path} does not exist.')
-        if isinstance(self.pwd, FileNode):
-            ### 删除该文件
-            self.pwd.parent.children_pkls.remove(self.pwd.local_file)
-            os.remove(self.pwd.local_file)
-            self.pwd.parent.children.remove(self.pwd)
-            self.pwd.parent.metadata['files'].pop(self.pwd.metadata['name'])
-            self.pwd.parent.update()
-        ### 如果是文件夹，需要递归删除文件夹下的所有文件和文件夹
-        elif isinstance(self.pwd, FolderNode):
-            # 递归删除所有子节点
-            self._recursive_delete_folder(self.pwd)
-
-        #self.reconstruct_tree(f'{self.metadata_path}/root.pkl')
-        return True
-
-    def _recursive_delete_folder(self, FolderNode):
-        """
-        递归删除文件夹下的所有文件和文件夹
-        :param folder: 文件夹节点
-        :return:
-        """
-        # 复制一份子节点列表，因为在迭代过程中会修改这个列表
-        for child in list(FolderNode.children):
-            if isinstance(child, FileNode):
-                ### 删除该文件
-                FolderNode.children_pkls.remove(child.local_file)
-                os.remove(child.local_file)
-                FolderNode.children.remove(child)
-                FolderNode.metadata['files'].pop(child.metadata['name'],None)
-            elif isinstance(child, FolderNode):
-                self._recursive_delete_folder(child)
-        # 如果文件夹不是根节点，则需要更新父节点的信息
-        if FolderNode.parent:
-            FolderNode.parent.children_pkls.remove(FolderNode.local_file)
-            FolderNode.parent.children.remove(FolderNode)
-            FolderNode.parent.metadata['files'].pop(FolderNode.metadata['name'], None)
-            FolderNode.parent.update()
-        os.remove(FolderNode.local_file)
+        # 递归完全退出时，更新父节点的信息
+        if folder == self.pwd:
+            folder.parent.children_pkls.remove(folder.local_file)
+            folder.parent.children.remove(folder)
+            folder.parent.metadata['files'].pop(folder.name)
+        self.pwd = folder.parent
+        refcount = sys.getrefcount(folder)
+        if refcount != 2:
+            raise OSError(f'{folder} is not deleted.')
+        return
 
 
 class MetadataNode:
@@ -214,27 +196,33 @@ class MetadataNode:
         :param path: 绝对路径
         """
         self.parent: MetadataNode = parent
-        self.path: str = path
-        self.name: str = path.split('/')[-1]
-        self._metadata = OrderedDict()
+        self.path = path
+        if path[-1] == '/':
+            self.name = path.split('/')[-2]
+        else:
+            self.name = path.split('/')[-1]
+        self.metadata = OrderedDict()
         self.local_file: str = ''
 
-    @property
-    @abstractmethod
-    def metadata(self):
-        file_size = 
+    # @property
+    # @abstractmethod
+    # def metadata(self):
+    #     return self.metadata
 
-    def update(self, **kwargs):
-        """
-        更新metadata内容
-        """
-        for k, v in kwargs.items():
-            if k not in self._metadata:
-                raise KeyError(f'{k} is not in metadata.')
-            self._metadata[k] = v
-        self._metadata['update-time'] = time.time()
-        with open(self.local_file, 'wb') as f:
-            f.write(pickle.dumps(self))
+    # def update(self, **kwargs):
+    #     """
+    #     更新metadata内容
+    #     """
+    #     for k, v in kwargs.items():
+    #         if k not in self.metadata:
+    #             raise KeyError(f'{k} is not in metadata.')
+    #         self.metadata[k] = v
+    #     self.metadata['update-time'] = time.time()
+    #     with open(self.local_file, 'wb') as f:
+    #         f.write(pickle.dumps(self))
+
+    def __eq__(self, other):
+        return self.path == other.path
 
 
 class FolderNode(MetadataNode):
@@ -243,54 +231,55 @@ class FolderNode(MetadataNode):
         self.children: list[MetadataNode] = []
 
         create_time = time.time()
-        self._metadata['create-time'] = create_time
-        self._metadata['update-time'] = create_time
-        self._metadata['name'] = path.split('/')[-1]
-        self._metadata['files'] = OrderedDict()
-        self._metadata['files']['.'] = self
-
-        #### 子节点的children需要存储自己吗？
-        self.children.append(self)
-        if self.parent is not None:
-            self._metadata['files']['..'] = self.parent
-            self.children.append(parent)   ######### 子节点的children需要存储父亲吗？
+        self.metadata['create_time'] = create_time
+        self.metadata['update_time'] = create_time
+        self.metadata['name'] = path.split('/')[-1]
+        self.metadata['files'] = OrderedDict()
 
         # 只有子节点的pkl文件路径才需要存，父节点、本节点的不在这里存
         self.children_pkls: list[str] = []
+        m = md5()
+        m.update(self.metadata.__str__().encode('utf-8'))
+        self.local_file = f"{MetadataServer.metadata_path}/{m.hexdigest()}.pkl"
+        with open(self.local_file, 'wb') as f:
+            f.write(pickle.dumps(self))
 
     def add_child(self, child):
-        self._metadata['files'][child.name] = child
+        self.metadata['files'][child.name] = child
+        self.metadata['update_time'] = time.time()
         self.children.append(child)
         self.children_pkls.append(child.local_file)
         with open(self.local_file, 'wb') as f:
             f.write(pickle.dumps(self))
 
-    @property
-    def metadata(self):
-        return self._metadata
+    def remove_child(self, child):
+        self.metadata['files'].pop(child.name)
+        self.metadata['update_time'] = time.time()
+        self.children.remove(child)
+        self.children_pkls.remove(child.local_file)
+        os.remove(child.local_file)
+        with open(self.local_file, 'wb') as f:
+            f.write(pickle.dumps(self))
+
+    # @property
+    # def metadata(self):
+    #     return self.metadata
 
 
 class FileNode(MetadataNode):
     def __init__(self, parent, path, **metadata):
         super().__init__(parent, path, **metadata)
 
-        self._metadata['create-time'] = time.time()
-        self._metadata['update-time'] = time.time()
-        self._metadata['name'] = path.split('/')[-1]
-        self._metadata['file-size'] = metadata['file_size']
-        self._metadata['chunk-num'] = metadata['chunk_num']
-        self._metadata['main-chunk-list'] = metadata['main_chunk_list']
-        self._metadata['replications'] = metadata['replications']
+        self.metadata['create_time'] = time.time()
+        self.metadata['update_time'] = time.time()
+        self.metadata['name'] = path.split('/')[-1]
+        self.metadata['file_size'] = metadata['file_size']
+        self.metadata['chunk_num'] = metadata['chunk_num']
+        self.metadata['main_chunk_list'] = metadata['main_chunk_list']
+        self.metadata['replications'] = metadata['replications']
 
         m = md5()
-        m.update(self._metadata.__str__().encode('utf-8'))
+        m.update(self.metadata.__str__().encode('utf-8'))
         self.local_file = f"{MetadataServer.metadata_path}/{m.hexdigest()}.pkl"
         with open(self.local_file, 'wb') as f:
             f.write(pickle.dumps(self))
-
-    @property
-    def metadata(self):
-        return self._metadata
-    @property
-    def name(self):
-        return self._metadata['name']

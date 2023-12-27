@@ -4,17 +4,17 @@ def rm(self, path, working_directory):
         path = working_directory + '/' + path
     if not self.exist(path):
         raise FileNotFoundError(f'{path} does not exist.')
-    if isinstance(self.pwd, FileNode):
+    if isinstance(self.working_directory, FileNode):
         ### 删除该文件
-        self.pwd.parent.children_pkls.remove(self.pwd.local_file)
-        os.remove(self.pwd.local_file)
-        self.pwd.parent.children.remove(self.pwd)
-        self.pwd.parent.metadata['files'].pop(self.pwd.metadata['name'])
-        self.pwd.parent.update()
+        self.working_directory.parent.children_pkls.remove(self.working_directory.local_file)
+        os.remove(self.working_directory.local_file)
+        self.working_directory.parent.children.remove(self.working_directory)
+        self.working_directory.parent.metadata['files'].pop(self.working_directory.metadata['name'])
+        self.working_directory.parent.update()
     ### 如果是文件夹，需要递归删除文件夹下的所有文件和文件夹
-    elif isinstance(self.pwd, FolderNode):
+    elif isinstance(self.working_directory, FolderNode):
         # 递归删除所有子节点
-        self._recursive_delete_folder(self.pwd)
+        self._recursive_delete_folder(self.working_directory)
 
     #self.reconstruct_tree(f'{self.metadata_path}/root.pkl')
     return True

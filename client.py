@@ -1,68 +1,114 @@
+import json
+
 import requests
-import os
+
+
 class Client:
     def __init__(self, name_server_url):
-        self.name_server = 'name_server'
+        self.name_server = name_server_url
 
     def _upload(self, file, path):
+        try:
+            with open(file, 'rb') as f:
+                file = f.read()
+        except FileNotFoundError:
+            print(f"Error: {file} does not exist.")
+            return
         response = requests.post(
             f'http://{self.name_server}:9080/upload',
             files={'file': file},
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+        else:
+            print()
 
     def _read(self, file_path):
         response = requests.get(
             f'http://{self.name_server}:9080/read',
-            data={'path': file_path}
+            params={'path': file_path}
         )
-        if response.status_code == 200:
-            print(response.json())
-        else:
-            print(f"Error: {response.json()['message']}")
+        try:
+            if response.json()['status'] != 'success':
+                print(f"Error: {response.json()['message']}")
+                return
+        except json.decoder.JSONDecodeError:
+            pass
+        file = response.content
+        file_name = file_path.split('/')[-1]
+        with open(f'test_files/{file_name}', 'wb') as f:
+            f.write(file)
+        print(f"Successfully downloaded {file_name} to test_files/")
 
     def _mkdir(self, path):
         response = requests.post(
             f'http://{self.name_server}:9080/mkdir',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+        else:
+            print()
 
     def _ls(self, path):
-        response = requests.get(
+        response = requests.post(
             f'http://{self.name_server}:9080/ls',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+            return
+        list_files = response.json()['data']
+        res = " ".join(list_files)
+        print(res)
 
     def _rm(self, path):
         response = requests.post(
             f'http://{self.name_server}:9080/rm',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+        else:
+            print()
 
     def _touch(self, path):
         response = requests.post(
             f'http://{self.name_server}:9080/touch',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+        else:
+            print()
 
     def _cd(self, path):
         response = requests.post(
             f'http://{self.name_server}:9080/cd',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+        else:
+            print()
+
+    def _pwd(self):
+        response = requests.get(f'http://{self.name_server}:9080/cd')
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+            return
+        print(response.json()['working_directory'])
 
     def _read_metadata(self, path):
         response = requests.get(
             f'http://{self.name_server}:9080/read_metadata',
             data={'path': path}
         )
-        print(response.json())
+        if response.json()['status'] != 'success':
+            print(f"Error: {response.json()['message']}")
+            return
+        print(response.json()['data'])
 
     def run(self):
         """
@@ -89,11 +135,16 @@ class Client:
                 self._touch(*args)
             elif command == 'cd':
                 self._cd(*args)
+            elif command == 'pwd':
+                self._pwd()
             elif command == 'read_metadata':
                 self._read_metadata(*args)
             elif command == 'exit':
                 break
             else:
-                print("Invalid command. Supported commands: upload, read, mkdir, ls, rm, touch, cd, read_metadata, exit")
+                print("Invalid command. Supported commands: upload, read, mkdir, ls, "
+                      "rm, touch, cd, pwd, read_metadata, exit")
+
+
 client = Client(name_server_url='name_server')
 client.run()
