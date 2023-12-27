@@ -5,10 +5,10 @@ from flask import Flask, request, jsonify
 
 
 class NameServer:
-    def __init__(self, metadata_server):
+    def __init__(self, metadata_server=None):
         self.working_directory = '/'
-        self.metadata_server: MetadataServer = metadata_server
-        self.root = metadata_server.root
+        self.metadata_server: MetadataServer = MetadataServer()
+        self.root = self.metadata_server.root
 
     def mkdir(self):
         """
@@ -27,7 +27,7 @@ class NameServer:
         """
         path = request.form.get('path')
         res = self.metadata_server.ls(path, self.working_directory)
-        if not isinstance(res, str):
+        if res == 'success':
             return jsonify({'status': 'success', 'data': res})
         else:
             return jsonify({'status': 'fail', 'error': res})
@@ -39,8 +39,8 @@ class NameServer:
         path = request.form.get('path')
 
         res = self.metadata_server.rm(path, self.working_directory)
-        response = requests.get('http://')
-
+        # TODO: 在这里向dataserver发送删除文件的请求
+        # response = requests.get('http://')
         if res == 'success':
             return jsonify({'status': 'success'})
         else:
@@ -50,7 +50,13 @@ class NameServer:
         """
         创建文件
         """
-        return self.metadata_server.touch(path, self.working_directory)
+        path = request.form.get('path')
+        res = self.metadata_server.touch(path, self.working_directory)
+        if res == 'success':
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'fail', 'error': res})
+        return
 
     def cd(self, path):
         """
@@ -120,10 +126,10 @@ app.add_url_rule('/upload', 'upload', ds.upload, methods=['POST'])
 # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
 app.add_url_rule('/read', 'read', ds.read, methods=['POST'])
 app.add_url_rule('/mkdir', 'mkdir', ds.mkdir, methods=['POST'])
-app.add_url_rule('/ls', 'ls', ds.ls, methods=['GET'])
+app.add_url_rule('/ls', 'ls', ds.ls, methods=['POST'])
 app.add_url_rule('/rm', 'rm', ds.rm, methods=['POST'])
 app.add_url_rule('/touch', 'touch', ds.touch, methods=['POST'])
 app.add_url_rule('/cd', 'cd', ds.cd, methods=['POST'])
 app.add_url_rule('/read_metadata', 'read_metadata', ds.read_metadata, methods=['GET'])
 if __name__ == '__main__':
-    app.run(port=9080)
+    app.run(host='0.0.0.0', port=9080)

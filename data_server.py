@@ -113,4 +113,4 @@ if __name__ == '__main__':
     app.add_url_rule('/upload_chunk', 'upload_chunk', ds.handle_request, methods=['POST'])
     # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
     app.add_url_rule('/read_chunk', 'read_chunk', ds.read, methods=['POST'])
-    app.run(port=9080)
+    app.run(host='0.0.0.0', port=9080)

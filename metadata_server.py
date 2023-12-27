@@ -56,6 +56,9 @@ class MetadataServer:
         :param path: dfs文件系统中的绝对路径
         :return:
         """
+        if path == '/':
+            self.pwd = self.root
+            return True
         path = path.split('/')
         self.pwd = self.root
         enter_flag = False
@@ -107,7 +110,10 @@ class MetadataServer:
         folder = self.pwd
         self.pwd = pwd
         res = list(folder.metadata['files'].values())
-        res = ['.', '..'] + res
+        if abs_path == '/':
+            res = ['.'] + res
+        else:
+            res = ['.', '..'] + res
         return res
 
     def mkdir(self, path, working_directory):
@@ -124,11 +130,14 @@ class MetadataServer:
         return cd_res
 
     def touch(self, path, working_directory):
-        path = path.split('/')
-        parent = working_directory + '/'.join(path[:-1])
-        cd_res = self.cd(path, )
-        new_node = FileNode(parent, path)
-        parent.add_child(new_node)
+        abs_path = self.get_abs_path(path, working_directory)
+        if self.exist(abs_path):
+            return f'{path} already exists.'
+        parent = "/".join(path.split('/')[:-1])
+        self.cd(parent, working_directory)
+        new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[], replications=0)
+        self.pwd.add_child(new_file)
+        return 'success'
 
     def cd(self, path, working_directory):
         abs_path = self.get_abs_path(path, working_directory)

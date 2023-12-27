@@ -25,7 +25,7 @@ class Client:
             print()
 
     def _read(self, file_path):
-        response = requests.get(
+        response = requests.post(
             f'http://{self.name_server}:9080/read',
             params={'path': file_path}
         )
@@ -51,7 +51,7 @@ class Client:
         else:
             print()
 
-    def _ls(self, path):
+    def _ls(self, path='.'):
         response = requests.post(
             f'http://{self.name_server}:9080/ls',
             data={'path': path}
@@ -94,7 +94,7 @@ class Client:
             print()
 
     def _pwd(self):
-        response = requests.get(f'http://{self.name_server}:9080/cd')
+        response = requests.post(f'http://{self.name_server}:9080/cd')
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
             return
