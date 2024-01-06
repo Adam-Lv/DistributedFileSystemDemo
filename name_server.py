@@ -1,9 +1,12 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+
 import requests
 import yaml
 from hashlib import md5
 from metadata_server import MetadataServer
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 
 
 class NameServer:
@@ -29,7 +32,7 @@ class NameServer:
             files={'file': (file_name, data)},
             data={'source': 'name_server', 'chunk_num': chunk_num}
         )
-        # TODO: 添加失败的逻辑。这里默认发送成功
+        # TODO: 添加失败的逻辑。这里默认发送成功（可能不需要做）
         return response.json()['local_path']
 
     @staticmethod
@@ -41,9 +44,23 @@ class NameServer:
             f'http://{host}:9080/read_chunk',
             data={'file_name': file_name}
         )
-        if response.json()['status'] != 'success':
-            return None, response.json()['message']
-        return response.json()['data'], None
+        try:
+            if response.json()['status'] != 'success':
+                print(f"Error: {response.json()['message']}")
+                return
+        except json.decoder.JSONDecodeError as e:
+            pass
+        return response.content, 'success'
+
+    @staticmethod
+    def remove_chunk(host, chunk_prefix):
+        """
+        从DataServer删除文件块
+        """
+        requests.post(
+            f'http://{host}:9080/remove_chunk',
+            data={'chunk_prefix': chunk_prefix}
+        )
 
     def mkdir(self):
         """
@@ -72,9 +89,20 @@ class NameServer:
         删除文件
         """
         path = request.form.get('path')
+        metadata = self.metadata_server.read_metadata(path, self.working_directory)
+        if isinstance(metadata, str):
+            return jsonify({'status': 'fail', 'message': metadata})
+        try:
+            chunk_name = metadata['chunk_name']
+            chunk_prefix = chunk_name[0].split('.')[0]
+            chunk_prefix = chunk_prefix.split('/')[-1]
+            # 开启线程池，删除文件块
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                for data_server in self.data_servers:
+                    executor.submit(self.remove_chunk, data_server, chunk_prefix)
+        except TypeError:
+            pass
         res = self.metadata_server.rm(path, self.working_directory)
-        # TODO: 在这里向dataserver发送删除文件的请求
-        # response = requests.get('http://')
         if res == 'success':
             return jsonify({'status': 'success'})
         else:
@@ -117,7 +145,6 @@ class NameServer:
         metadata = self.metadata_server.read_metadata(path, self.working_directory)
         if isinstance(metadata, str):
             return jsonify({'status': 'fail', 'message': metadata})
-        # TODO: self.metadata_server.pwd.metadata无法转换json。
         return jsonify({'status': 'success', 'data': dict(metadata)})
 
     def upload(self):
@@ -139,8 +166,8 @@ class NameServer:
             chunk = file.stream.read(chunk_size)
             if not chunk:
                 break
-            chunk_num += 1
             main_chunk_list.append(chunk_num % 4)
+            chunk_num += 1
             chunks.append(chunk)
         file_size = file.tell()
         metadata = {
@@ -152,12 +179,13 @@ class NameServer:
         }
         touch_res = self.metadata_server.touch(path, self.working_directory, metadata)
         if touch_res != 'success':
-            return jsonify({'status': 'fail', 'message': touch_res})
+            self.metadata_server.rm(path, self.working_directory)
+        self.metadata_server.touch(path, self.working_directory, metadata)
         # touch创建新文件后，会将pwd指向新文件，获取它的绝对路径
         file_name = self.metadata_server.pwd.path
         # 但是由于绝对路径包含斜杠，无法直接作为文件名，所以需要对文件名进行hash
         m = md5()
-        m.update(file_name)
+        m.update(file_name.encode('utf-8'))
         file_name = m.hexdigest()
         # 创建一个线程池，将chunk发送给对应的dataserver
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -167,7 +195,8 @@ class NameServer:
                                                chunk, file_name, chunk_num))
             results = [thread.result() for thread in threads]
         # 更新metadata中的chunk_name
-        self.metadata_server.pwd.update({'chunk_name': results})
+        self.metadata_server.pwd.update(chunk_name=results)
+        self.metadata_server.save_pickle()
         return jsonify({'status': 'success'})
 
     def read(self):
@@ -180,13 +209,13 @@ class NameServer:
         # 3. 从dataserver中读取每个块，拼接成完整的文件，返回文件流
         #    requests会返回一些信息{'status': 'success', 'data': data}
         # 4. 接收dataserver返回的文件流，拼接成完整的文件，存在本地
-        path = request.args.get('path')
+        path = request.form.get('path')
         metadata = self.metadata_server.read_metadata(path, self.working_directory)
         if isinstance(metadata, str):
             return jsonify({'status': 'fail', 'message': metadata})
         main_chunk_list = metadata['main_chunk_list']
         chunk_name = metadata['chunk_name']
-        chunks = dict()
+        chunks = []
         # 创建一个线程池，从dataserver中读取chunk
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
@@ -198,8 +227,13 @@ class NameServer:
                 if chunk is None:
                     # TODO: 添加读取备份的逻辑
                     return jsonify({'status': 'fail', 'message': message})
-                chunks[chunk_num] = chunk
-        return jsonify({'status': 'success', 'data': chunks})
+                chunks.append(chunk)
+        content = chunks[0]
+        for chunk in chunks[1:]:
+            content += chunk
+        bytes_io = BytesIO(content)
+        return send_file(bytes_io, mimetype='application/octet-stream',
+                         as_attachment=True, download_name=metadata['name'])
 
 
 # if __name__ == '__main__':
@@ -208,7 +242,7 @@ ds = NameServer()
 # 客户端通过访问http://localhost:9080/upload_chunk来上传文件块
 app.add_url_rule('/upload', 'upload', ds.upload, methods=['POST'])
 # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
-app.add_url_rule('/read', 'read', ds.read, methods=['GET'])
+app.add_url_rule('/read', 'read', ds.read, methods=['POST'])
 app.add_url_rule('/mkdir', 'mkdir', ds.mkdir, methods=['POST'])
 app.add_url_rule('/ls', 'ls', ds.ls, methods=['POST'])
 app.add_url_rule('/rm', 'rm', ds.rm, methods=['POST'])

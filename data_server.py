@@ -1,7 +1,7 @@
 import os
 import socket
 import yaml
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import md5
@@ -14,8 +14,10 @@ class DataServer:
     def __init__(self):
         if not os.path.exists(self.data_disk_path):
             os.mkdir(self.data_disk_path)
-        # if not os.path.exists(self.metadata_path):
-        #     os.mkdir(self.metadata_path)
+        if not os.path.exists(os.path.join(self.data_disk_path, 'main')):
+            os.mkdir(os.path.join(self.data_disk_path, 'main'))
+        if not os.path.exists(os.path.join(self.data_disk_path, 'replication')):
+            os.mkdir(os.path.join(self.data_disk_path, 'replication'))
 
         all_data_servers = self.get_hostnames()  # 所有的data_server的hostname
         self.hostname = socket.gethostname()  # 当前data_server的hostname
@@ -54,7 +56,7 @@ class DataServer:
             checksum = DataServer._cal_checksum(data)
             file_name = os.path.join(DataServer.data_disk_path, 'main', f'{file_name}.{chunk_num}.{checksum}')
         else:
-            file_name, checksum = file_name.split('.')[0], file_name.split[2]
+            file_name, checksum = file_name.split('.')[0], file_name.split('.')[2]
             file_name = os.path.join(DataServer.data_disk_path, 'replication', f'{file_name}.{chunk_num}.{checksum}')
         ### 这里的wb保证了当文件不存在时，会创建文件，如果文件存在，则会覆盖文件
         with open(file_name, 'wb') as f:
@@ -78,7 +80,7 @@ class DataServer:
         cal_checksum = DataServer._cal_checksum(data)
         if checksum == cal_checksum:
             # checksum一致，说明文件没有损坏
-            return jsonify({'status': 'success', 'data': data})
+            return send_file(file_name, as_attachment=True)
         else:
             return jsonify({'status': 'fail', 'data': None, 'message': 'file broken'})
 
@@ -89,9 +91,13 @@ class DataServer:
         同时给NameServer返回本地文件的路径，以便NameServer更新metadata
         """
         source = request.form.get('source')
-        file_name, data = request.files['file']
+        file = request.files['file']
+        file_name = file.filename
+        data = file.read()
+        # chunk_num是文件块的编号
         chunk_num = request.form.get('chunk_num')
         local_path = DataServer._write(data, file_name, chunk_num)
+        file_name = os.path.basename(local_path)
         # 如果是name_server发的，就需要分发给其他data_server
         if source == 'name_server':
             # 用线程池发送多个文件块，并发操作提高速度
@@ -99,6 +105,21 @@ class DataServer:
                 for data_server in self.peer_data_servers:
                     executor.submit(self.send_chunk, self.hostname, data_server, data, file_name, chunk_num)
         return jsonify({'status': 'success', 'local_path': local_path})
+
+    @staticmethod
+    def remove_chunks():
+        """
+        删除本地的文件块，包括main和replication
+        """
+        chunk_prefix = request.form.get('chunk_prefix')
+        print(chunk_prefix)
+        for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'main')):
+            if chunk.startswith(chunk_prefix):
+                os.remove(os.path.join(DataServer.data_disk_path, 'main', chunk))
+        for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'replication')):
+            if chunk.startswith(chunk_prefix):
+                os.remove(os.path.join(DataServer.data_disk_path, 'replication', chunk))
+        return jsonify({'status': 'success'})
 
     @staticmethod
     def send_chunk(source, host, data, file_name, chunk_num):
@@ -119,4 +140,5 @@ if __name__ == '__main__':
     app.add_url_rule('/upload_chunk', 'upload_chunk', ds.upload_chunk, methods=['POST'])
     # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
     app.add_url_rule('/read_chunk', 'read_chunk', ds.read_chunk, methods=['POST'])
+    app.add_url_rule('/remove_chunk', 'remove_chunk', ds.remove_chunks, methods=['POST'])
     app.run(host='0.0.0.0', port=9080)

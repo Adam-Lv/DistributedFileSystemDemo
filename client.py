@@ -1,5 +1,6 @@
 import json
 import requests
+import os
 
 
 class Client:
@@ -9,34 +10,36 @@ class Client:
     def _upload(self, file, path):
         try:
             with open(file, 'rb') as f:
-                file = f.read()
+                file_r = f.read()
         except FileNotFoundError:
             print(f"Error: {file} does not exist.")
             return
+        file_name = os.path.basename(file)
+        path = os.path.join(path, file_name)
         response = requests.post(
             f'http://{self.name_server}:9080/upload',
-            files={'file': file},
+            files={'file': file_r},
             data={'path': path}
         )
         if response.json()['status'] != 'success':
             print(f"Error: {response.json()['message']}")
 
     def _read(self, file_path):
-        response = requests.get(
+        response = requests.post(
             f'http://{self.name_server}:9080/read',
-            params={'path': file_path}
+            data={'path': file_path}
         )
         try:
             if response.json()['status'] != 'success':
                 print(f"Error: {response.json()['message']}")
                 return
-        except json.decoder.JSONDecodeError:
+        except json.decoder.JSONDecodeError as e:
             pass
         file = response.content
         file_name = file_path.split('/')[-1]
-        with open(f'test_files/{file_name}', 'wb') as f:
+        with open(f'test_files/download/{file_name}', 'wb') as f:
             f.write(file)
-        print(f"Successfully downloaded {file_name} to test_files/")
+        print(f"Successfully downloaded {file_name} to test_files/download/")
 
     def _mkdir(self, path):
         response = requests.post(

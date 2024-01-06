@@ -2,7 +2,6 @@ import pickle
 import time
 import os
 from collections import OrderedDict
-import sys
 
 
 class MetadataServer:
@@ -110,6 +109,7 @@ class MetadataServer:
         else:
             new_file = FileNode(self.pwd, abs_path, **metadata)
         self.pwd.add_child(new_file)
+        self.pwd = new_file
         self.save_pickle()
         return 'success'
 
@@ -164,7 +164,7 @@ class MetadataNode:
             if k not in self.metadata:
                 raise KeyError(f'{k} is not in metadata.')
             self.metadata[k] = v
-        self.metadata['update-time'] = time.time()
+        self.metadata['update_time'] = time.time()
 
     def __eq__(self, other):
         return self.path == other.path
@@ -199,6 +199,7 @@ class FileNode(MetadataNode):
         self.metadata['create_time'] = time.time()
         self.metadata['update_time'] = time.time()
         self.metadata['name'] = path.split('/')[-1]
+        self.metadata['path'] = path
         self.metadata['file_size'] = metadata['file_size']
         self.metadata['chunk_num'] = metadata['chunk_num']
         self.metadata['main_chunk_list'] = metadata['main_chunk_list']
