@@ -114,10 +114,11 @@ class NameServer:
         读取传入path的metadata，可以是文件或者目录
         """
         path = request.form.get('path')
-        if not self.metadata_server.exist(path):
-            return jsonify({'status': 'fail', 'message': 'path does not exist'})
+        metadata = self.metadata_server.read_metadata(path, self.working_directory)
+        if isinstance(metadata, str):
+            return jsonify({'status': 'fail', 'message': metadata})
         # TODO: self.metadata_server.pwd.metadata无法转换json。
-        return jsonify({'status': 'success', 'data': dict(self.metadata_server.pwd.metadata)})
+        return jsonify({'status': 'success', 'data': dict(metadata)})
 
     def upload(self):
         """

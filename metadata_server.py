@@ -2,7 +2,6 @@ import pickle
 import time
 import os
 from collections import OrderedDict
-from hashlib import md5
 import sys
 
 
@@ -91,7 +90,10 @@ class MetadataServer:
         cd_res = self.cd(parent, '/')
         if cd_res != 'success':
             return cd_res
-        new_node = FolderNode(parent, abs_path)
+        new_folder_name = abs_path.split('/')[-1]
+        if new_folder_name in self.pwd.metadata['files']:
+            return f'{new_folder_name} already exists.'
+        new_node = FolderNode(self.pwd, abs_path)
         self.pwd.add_child(new_node)
         self.save_pickle()
         return cd_res
@@ -103,10 +105,10 @@ class MetadataServer:
         parent = "/".join(path.split('/')[:-1])
         self.cd(parent, working_directory)
         if metadata is None:
-            new_file = FileNode(parent, abs_path, file_size=0, chunk_num='0', main_chunk_list=[],
+            new_file = FileNode(self.pwd, abs_path, file_size=0, chunk_num='0', main_chunk_list=[],
                                 replications=0, chunk_name=None)
         else:
-            new_file = FileNode(parent, abs_path, **metadata)
+            new_file = FileNode(self.pwd, abs_path, **metadata)
         self.pwd.add_child(new_file)
         self.save_pickle()
         return 'success'
@@ -132,38 +134,6 @@ class MetadataServer:
         parent.remove_child(self.pwd)
         self.save_pickle()
         return 'success'
-
-    def _recursive_delete_folder(self, folder):
-        """
-        递归删除文件夹下的所有文件和文件夹
-        :param folder: 文件夹节点
-        """
-        if folder == self.root:
-            # for local_file in os.listdir(MetadataServer.metadata_path):
-            #     os.remove(local_file)
-            folder.children = []
-            # folder.children_pkls = []
-            folder.metadata['files'] = OrderedDict()
-            self.pwd = self.root
-            return
-        # 删除当前文件夹的metadata文件
-        # os.remove(folder.local_file)
-        for child in folder.children:
-            # if isinstance(child, FileNode):
-            #     删除该文件的metadata文件
-            #     os.remove(child.local_file)
-            if isinstance(child, folder):
-                self._recursive_delete_folder(child)
-        # 递归完全退出时，更新父节点的信息
-        if folder == self.pwd:
-            # folder.parent.children_pkls.remove(folder.local_file)
-            folder.parent.children.remove(folder)
-            folder.parent.metadata['files'].pop(folder.name)
-        self.pwd = folder.parent
-        refcount = sys.getrefcount(folder)
-        if refcount != 2:
-            raise OSError(f'{folder} is not deleted.')
-        return
 
     def read_metadata(self, path, working_directory):
         abs_path = self.get_abs_path(path, working_directory)
@@ -217,7 +187,7 @@ class FolderNode(MetadataNode):
         self.children[child.name] = child
 
     def remove_child(self, child):
-        self.metadata['files'].pop(child.name)
+        self.metadata['files'].remove(child.name)
         self.metadata['update_time'] = time.time()
         del self.children[child.name]
 
