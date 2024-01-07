@@ -15,7 +15,7 @@ class Client:
             print(f"Error: {file} does not exist.")
             return
         file_name = os.path.basename(file)
-        path = os.path.join(path, file_name)
+        path = f'{path}/{file_name}'
         response = requests.post(
             f'http://{self.name_server}:9080/upload',
             files={'file': file_r},

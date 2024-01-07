@@ -53,13 +53,13 @@ class NameServer:
         return response.content, 'success'
 
     @staticmethod
-    def remove_chunk(host, chunk_prefix):
+    def remove_chunks(host, chunk_prefixes):
         """
         从DataServer删除文件块
         """
         requests.post(
-            f'http://{host}:9080/remove_chunk',
-            data={'chunk_prefix': chunk_prefix}
+            f'http://{host}:9080/remove_chunks',
+            data={'chunk_prefixes': chunk_prefixes}
         )
 
     def mkdir(self):
@@ -86,7 +86,7 @@ class NameServer:
 
     def rm(self):
         """
-        删除文件
+        删除文件或者目录
         """
         path = request.form.get('path')
         metadata = self.metadata_server.read_metadata(path, self.working_directory)
@@ -99,9 +99,17 @@ class NameServer:
             # 开启线程池，删除文件块
             with ThreadPoolExecutor(max_workers=4) as executor:
                 for data_server in self.data_servers:
-                    executor.submit(self.remove_chunk, data_server, chunk_prefix)
+                    executor.submit(self.remove_chunks, data_server, [chunk_prefix])
         except TypeError:
             pass
+        except KeyError:
+            # 这里是目录，调用dir_files获取目录下的所有文件的chunk_name前缀
+            chunk_prefixes = MetadataServer.dir_files(self.metadata_server.pwd)
+            print(chunk_prefixes)
+            # 开启线程池，删除文件块
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                for data_server in self.data_servers:
+                    executor.submit(self.remove_chunks, data_server, chunk_prefixes)
         res = self.metadata_server.rm(path, self.working_directory)
         if res == 'success':
             return jsonify({'status': 'success'})
@@ -179,6 +187,10 @@ class NameServer:
         }
         touch_res = self.metadata_server.touch(path, self.working_directory, metadata)
         if touch_res != 'success':
+            if not touch_res.endswith('exists.'):
+                # 文件夹不存在
+                return jsonify({'status': 'fail', 'message': touch_res})
+            # 文件已经存在，准备覆盖
             self.metadata_server.rm(path, self.working_directory)
         self.metadata_server.touch(path, self.working_directory, metadata)
         # touch创建新文件后，会将pwd指向新文件，获取它的绝对路径

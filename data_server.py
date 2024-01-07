@@ -111,14 +111,14 @@ class DataServer:
         """
         删除本地的文件块，包括main和replication
         """
-        chunk_prefix = request.form.get('chunk_prefix')
-        print(chunk_prefix)
-        for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'main')):
-            if chunk.startswith(chunk_prefix):
-                os.remove(os.path.join(DataServer.data_disk_path, 'main', chunk))
-        for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'replication')):
-            if chunk.startswith(chunk_prefix):
-                os.remove(os.path.join(DataServer.data_disk_path, 'replication', chunk))
+        chunk_prefixes = request.form.get('chunk_prefixes')
+        for chunk_prefix in chunk_prefixes:
+            for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'main')):
+                if chunk.startswith(chunk_prefix):
+                    os.remove(os.path.join(DataServer.data_disk_path, 'main', chunk))
+            for chunk in os.listdir(os.path.join(DataServer.data_disk_path, 'replication')):
+                if chunk.startswith(chunk_prefix):
+                    os.remove(os.path.join(DataServer.data_disk_path, 'replication', chunk))
         return jsonify({'status': 'success'})
 
     @staticmethod
@@ -140,5 +140,5 @@ if __name__ == '__main__':
     app.add_url_rule('/upload_chunk', 'upload_chunk', ds.upload_chunk, methods=['POST'])
     # 客户端通过访问http://localhost:9080/read_chunk来读取文件块
     app.add_url_rule('/read_chunk', 'read_chunk', ds.read_chunk, methods=['POST'])
-    app.add_url_rule('/remove_chunk', 'remove_chunk', ds.remove_chunks, methods=['POST'])
+    app.add_url_rule('/remove_chunks', 'remove_chunks', ds.remove_chunks, methods=['POST'])
     app.run(host='0.0.0.0', port=9080)

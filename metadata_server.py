@@ -102,7 +102,9 @@ class MetadataServer:
         if self.exist(abs_path):
             return f'{path} already exists.'
         parent = "/".join(path.split('/')[:-1])
-        self.cd(parent, working_directory)
+        cd_res = self.cd(parent, working_directory)
+        if cd_res != 'success':
+            return cd_res
         if metadata is None:
             new_file = FileNode(self.pwd, abs_path, file_size=0, chunk_num='0', main_chunk_list=[],
                                 replications=0, chunk_name=None)
@@ -134,6 +136,30 @@ class MetadataServer:
         parent.remove_child(self.pwd)
         self.save_pickle()
         return 'success'
+
+    @staticmethod
+    def dir_files(folder):
+        """
+        找到当前目录下的所有文件以及所有子目录下的文件
+        :param folder: 文件夹节点
+        :return list: 所有在这个文件夹下的文件的chunk_name前缀（包含所有子目录）
+        """
+        res = []
+        # 用深度优先遍历找到所有文件
+        stack = [folder]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, FileNode):
+                try:
+                    chunk_name_prefix = node.metadata['chunk_name'][0].split('.')[0]
+                    res.append(chunk_name_prefix)
+                except TypeError:
+                    # 如果文件没有chunk_name属性，说明该文件是通过touch创建的，没有内容
+                    pass
+            else:
+                stack.extend(node.children.values())
+        print(res)
+        return res
 
     def read_metadata(self, path, working_directory):
         abs_path = self.get_abs_path(path, working_directory)
